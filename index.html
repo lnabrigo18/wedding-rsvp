@@ -1,97 +1,112 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
-  <title>Wedding RSVP</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    input, button { padding: 10px; margin: 5px 0; }
-    .guest-list { margin-top: 20px; }
-    .guest-item { margin: 5px 0; }
-  </style>
+  <title>Isaac & Reya's Wedding</title>
 </head>
 <body>
   <h1>Isaac & Reya's Wedding</h1>
   <p>Search your name to RSVP for you and your family.</p>
-  
-  <input type="text" id="search" placeholder="Enter your name">
-  <div id="suggestions"></div>
-  <div id="guestList"></div>
+
+  <input type="text" id="searchInput" placeholder="Enter your name" />
+  <div id="searchResults"></div>
+
+  <h3>Family RSVP</h3>
+  <div id="familyRSVP"></div>
   <button id="submitBtn" style="display:none;">Submit RSVP</button>
 
   <script>
-    const API_URL = "https://script.google.com/macros/s/AKfycbxYnnfwNGbwcs5VuDN180xMDqOKeBqpIipbK2ea0PB6086cvajFFLNzxHo1gHUMyjnGGg/exec"; // <-- paste your Web App URL here
-    let familyId = null;
-    let familyMembers = [];
+    const apiUrl = "https://script.google.com/macros/s/AKfycbx1WpW_D2O5-pnKWtW6yQgwRANOwfHB-rrARfsFP7yciijTwJlVEbkfpAHIMR5GDGiwQQ/exec";
 
-    // Fetch all guest data
-    async function fetchGuests() {
-      const res = await fetch(API_URL + "?action=getGuestList");
-      return res.json();
-    }
+    let selectedFamilyId = null;
+    let familyResponses = {};
 
-    // Search names
-    document.getElementById("search").addEventListener("input", async (e) => {
-      const term = e.target.value.toLowerCase();
-      const guests = await fetchGuests();
-      const matches = guests.filter(row => row[0].toLowerCase().includes(term));
-      showSuggestions(matches);
+    // --- Search guests ---
+    document.getElementById("searchInput").addEventListener("input", async function() {
+      const searchTerm = this.value.toLowerCase();
+      if (searchTerm.length < 2) return;
+
+      try {
+        const response = await fetch(`${apiUrl}?action=getGuestList`, {
+          method: "GET",
+        });
+        const guests = await response.json();
+
+        // guests is a 2D array from Google Sheets
+        const matches = guests.filter(row =>
+          row[0] && row[0].toLowerCase().includes(searchTerm)
+        );
+
+        let resultsDiv = document.getElementById("searchResults");
+        resultsDiv.innerHTML = "";
+        matches.forEach(row => {
+          let div = document.createElement("div");
+          div.textContent = row[0];
+          div.style.cursor = "pointer";
+          div.onclick = () => selectGuest(row[1], guests); // pass familyId + full list
+          resultsDiv.appendChild(div);
+        });
+      } catch (err) {
+        console.error("Error fetching guest list:", err);
+      }
     });
 
-    function showSuggestions(matches) {
-      const container = document.getElementById("suggestions");
-      container.innerHTML = "";
-      matches.forEach(match => {
-        const div = document.createElement("div");
-        div.textContent = match[0];
-        div.style.cursor = "pointer";
-        div.onclick = () => selectGuest(match[0], match[1], matches);
-        container.appendChild(div);
+    // --- Select a guest and show family RSVP ---
+    function selectGuest(familyId, allGuests) {
+      selectedFamilyId = familyId;
+      const family = allGuests.filter(row => row[1] === familyId);
+
+      let familyDiv = document.getElementById("familyRSVP");
+      familyDiv.innerHTML = "";
+      familyResponses = {};
+
+      family.forEach(member => {
+        const guestName = member[0];
+        const currentRSVP = member[2] === "Yes";
+
+        let checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = currentRSVP;
+        checkbox.onchange = () => {
+          familyResponses[guestName] = checkbox.checked ? "Yes" : "No";
+        };
+        familyResponses[guestName] = currentRSVP ? "Yes" : "No";
+
+        let label = document.createElement("label");
+        label.textContent = guestName + " ";
+
+        let div = document.createElement("div");
+        div.appendChild(label);
+        div.appendChild(checkbox);
+        div.append(" Attending");
+
+        familyDiv.appendChild(div);
       });
+
+      document.getElementById("submitBtn").style.display = "block";
     }
 
-    function selectGuest(name, famId, allMatches) {
-      familyId = famId;
-      document.getElementById("suggestions").innerHTML = "";
-      showFamily(famId, allMatches);
-    }
-
-    function showFamily(famId, guests) {
-      const container = document.getElementById("guestList");
-      container.innerHTML = "<h3>Family RSVP</h3>";
-      fetchGuests().then(allGuests => {
-        familyMembers = allGuests.filter(row => row[1] === famId);
-        familyMembers.forEach(member => {
-          const div = document.createElement("div");
-          div.className = "guest-item";
-          div.innerHTML = `
-            ${member[0]} 
-            <label><input type="checkbox" data-name="${member[0]}" value="Attending"> Attending</label>
-          `;
-          container.appendChild(div);
-        });
-        document.getElementById("submitBtn").style.display = "block";
-      });
-    }
-
+    // --- Submit RSVP ---
     document.getElementById("submitBtn").addEventListener("click", async () => {
-      const checkboxes = document.querySelectorAll("input[type=checkbox]");
-      let responses = {};
-      checkboxes.forEach(cb => {
-        responses[cb.dataset.name] = cb.checked ? "Attending" : "Not Attending";
-      });
+      if (!selectedFamilyId) return alert("Please select your name first.");
 
-      await fetch(API_URL + "?action=saveRSVP", {
-        method: "POST",
-        body: JSON.stringify({ familyId, responses }),
-        headers: { "Content-Type": "application/json" }
-      });
+      try {
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId: selectedFamilyId,
+            responses: familyResponses
+          }),
+        });
 
-      alert("Thank you! Your RSVP has been saved.");
+        const result = await response.json();
+        alert(result.message || "RSVP saved!");
+      } catch (err) {
+        console.error("Error saving RSVP:", err);
+        alert("There was an error saving your RSVP.");
+      }
     });
   </script>
 </body>
 </html>
-
-
-
